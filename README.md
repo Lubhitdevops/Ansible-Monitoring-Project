@@ -1,131 +1,136 @@
-Ansible Monitoring Project
+# Ansible Monitoring Stack Deployment on AWS EC2
 
-This project sets up a complete monitoring stack using Ansible on AWS EC2 instances.
-It installs and configures the following tools:
+## 📋 Project Overview
 
-Prometheus – Metrics collection and monitoring
+This project automates the deployment of a comprehensive monitoring stack on AWS EC2 instances using Ansible. The solution installs and configures industry-standard monitoring tools including Prometheus for metrics collection, Grafana for visualization, Alertmanager for alert routing, and Node Exporter for system-level metrics.
 
-Grafana – Visualization and dashboards
+## 🏗️ Architecture
 
-Alertmanager – Sending alerts to PagerDuty / Slack
+### Control Server (EC2 Instance)
+- Runs Ansible control node for automation
+- Configured with SSH key-based authentication to target nodes
+- Hosts playbooks and configuration templates
 
-Node Exporter – Exporting server-level metrics
+### Node Server (EC2 Instance)
+- Hosts the complete monitoring stack:
+  - **Prometheus** - Time-series database and metrics collection (port 9090)
+  - **Grafana** - Dashboard and visualization platform (port 3000)
+  - **Alertmanager** - Alert routing and management (port 9093)
+  - **Node Exporter** - System metrics exporter (port 9100)
+- All services configured as systemd services for easy management
 
-All tools are configured as systemd services so they can be easily started, stopped, and managed.
+## 🚀 Prerequisites
 
-🚀 Technologies Used
+- AWS account with EC2 access
+- Two EC2 instances (Amazon Linux 2 recommended)
+- Basic understanding of Ansible and SSH key management
 
-Amazon EC2 (Amazon Linux 2, but works with other AMIs too)
+## ⚙️ Installation & Configuration
 
-Ansible (Control node for automation)
+### 1. EC2 Instance Setup
+Launch two EC2 instances with the following specifications:
+- **Control Server**: t2.micro (Ansible control node)
+- **Node Server**: t2.medium (Monitoring stack host)
 
-Prometheus, Grafana, Alertmanager, Node Exporter
+Security groups should allow inbound traffic on:
+- TCP 22 (SSH)
+- TCP 3000 (Grafana)
+- TCP 9090 (Prometheus)
+- TCP 9093 (Alertmanager)
+- TCP 9100 (Node Exporter)
 
-PagerDuty / Slack integration for alerts
+### 2. System Configuration
 
-📋 Project Architecture
-
-Control Server (EC2):
-
-Runs Ansible to automate setup on the Node server.
-
-Configured with SSH key-based authentication.
-
-Node Server (EC2):
-
-Installs and runs Prometheus, Grafana, Alertmanager, Node Exporter as services.
-
-⚙️ Setup Steps
-1. Launch EC2 Instances
-
-Create 2 EC2 instances:
-
-control → Ansible Control Server
-
-node → Monitoring Node Server
-
-Allow All TCP (Custom IPv4 Anywhere) inbound rule on the Control Server for connectivity.
-
-2. Install Ansible on Control Server
+**On Control Server:**
+```bash
 sudo su -
+hostnamectl set-hostname control
 amazon-linux-extras install ansible2 -y
 ansible --version
+```
 
-3. Set Hostnames
+**On Node Server:**
+```bash
+sudo hostnamectl set-hostname node
+```
 
-On Control Server:
+### 3. SSH Key Setup
 
-hostnamectl set-hostname control
-
-
-On Node Server:
-
-hostnamectl set-hostname node
-
-4. Setup SSH Key Authentication
-
-On Control Server:
-
+**Generate key pair on Control Server:**
+```bash
 cd /root/.ssh/
 ls -ltr
 ssh-keygen    # Press enter for defaults
 cat id_rsa.pub
+```
 
-
-Copy the key.
-
-On Node Server:
-
+**Copy public key to Node Server:**
+```bash
 cd /root/.ssh/
 vi authorized_keys   # Paste the copied key, save & exit (:wq)
 chmod 600 authorized_keys
 cd ..
 chmod 700 .ssh
-
-
+```
 Now test connection from Control Server:
-
+```bash
 ssh <NODE_PUBLIC_IP>
+```
 
-5. Test Ansible Connectivity
-
+Test Ansible Connectivity
+```bash
 On Control Server:
 
 ansible all -m ping
+You should see "pong" as output
+```
 
+### 4. Ansible Configuration
 
-You should see "pong" as output.
-
-6. Clone Repository
-
-On Control Server:
-
+**Clone the repository:**
+```bash
 cd /home/ec2-user
 git clone https://github.com/Lubhitdevops/Ansible-Monitoring-Project.git
+cd Ansible-Monitoring-Project
+```
 
-7. Configure Inventory
-
-Edit the inventory file and add the Node Server public IP under the respective groups:
-
+**Configure inventory file:**
+```ini
 [prometheus]
+<node-private-ip> ansible_ssh_private_key_file=~/.ssh/ansible-monitoring
+else
 <node-public-ip>
 
 [grafana]
+<node-private-ip> ansible_ssh_private_key_file=~/.ssh/ansible-monitoring
+else
 <node-public-ip>
 
 [alertmanager]
+<node-private-ip> ansible_ssh_private_key_file=~/.ssh/ansible-monitoring
+else
 <node-public-ip>
 
 [node_exporter]
+<node-private-ip> ansible_ssh_private_key_file=~/.ssh/ansible-monitoring
+else
 <node-public-ip>
 
-8. Run Playbook
+[monitoring:children]
+prometheus
+grafana
+alertmanager
+node_exporter
+```
 
-Execute the playbook:
+### 5. Deployment
 
+**Execute the playbook:**
+```bash
 ansible-playbook -i inventory playbook.yml
-
-
+```
+**playbook.yml**
+```bash
 playbook.yml:
 
 - hosts: alertmanager
@@ -155,43 +160,75 @@ playbook.yml:
   become_method: sudo
   roles:
     - grafana
+```
 
-✅ Verification
-1. Check Services on Node Server
+## ✅ Verification
+
+**Check service status on Node Server:**
+```bash
 systemctl status prometheus
 systemctl status grafana-server
 systemctl status alertmanager
 systemctl status node_exporter
+```
 
+**Access the services on browser:**
+- Prometheus: http://<NODE_PUBLIC_IP>:9090
+- Grafana: http://<NODE_PUBLIC_IP>:3000 (admin/admin)
+- Alertmanager: http://<NODE_PUBLIC_IP>:9093
+- Node Exporter: http://<NODE_PUBLIC_IP>:9100/metrics
 
-All should show active (running).
+## 🔔 Alert Integration
 
-2. Access Tools in Browser
+The solution supports alert routing to multiple channels:
 
-Prometheus → http://<NODE_PUBLIC_IP>:9090
+### Slack Integration
+Edit `roles/alertmanager/templates/alertmanager.yml.j2` to include:
+```yaml
+receivers:
+  - name: 'slack-notifications'
+    slack_configs:
+      - channel: '#monitoring-alerts'
+        api_url: 'https://hooks.slack.com/services/XXXXX/XXXXX/XXXXX'
+```
 
-Grafana → http://<NODE_PUBLIC_IP>:3000 (Default login: admin/admin)
+### PagerDuty Integration
+```yaml
+receivers:
+  - name: 'pagerduty-notifications'
+    pagerduty_configs:
+      - service_key: 'your-pagerduty-integration-key'
+```
 
-Alertmanager → http://<NODE_PUBLIC_IP>:9093
+## 🛠️ Troubleshooting
 
-Node Exporter → http://<NODE_PUBLIC_IP>:9100/metrics
+**Common issues and solutions:**
 
-📡 Alerts Integration
+1. **Connection refused errors**: Verify security group rules and service status
+2. **Permission denied (publickey)**: Verify SSH key configuration and permissions
+3. **Service start failures**: Check journalctl logs for specific services
+   ```bash
+   journalctl -u prometheus -f
+   ```
 
-Alertmanager can be configured to send alerts to Slack or PagerDuty by editing the alertmanager.yml file under the role.
+## 📊 Next Steps
 
-📜 License
+- Configure additional exporters (MySQL, Nginx, Apache)
+- Set up TLS/SSL encryption for web interfaces
+- Implement backup strategies for Prometheus data
+- Configure Grafana data sources and dashboards
+- Set up alert rules in Prometheus
 
-This project is licensed under the MIT License – you are free to use, modify, and distribute it.
+## 📜 License
 
-🙏 Acknowledgements
+This project is licensed under the MIT License. See LICENSE file for details.
 
-Ansible
+## 🙏 Acknowledgments
 
-Prometheus
+- **Ansible** for infrastructure automation
+- **Prometheus** for metrics collection and monitoring
+- **Grafana** for visualization capabilities
+- **Alertmanager** for alert management
+- **Node Exporter** for system metrics collection
 
-Grafana
-
-Alertmanager
-
-Node Exporter
+---
